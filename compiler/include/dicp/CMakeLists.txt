@@ -1,5 +1,6 @@
 add_subdirectory(AutoBlockify)
 add_subdirectory(AscendLegalize)
+add_subdirectory(Conversion)
 add_subdirectory(Dialect)
 add_subdirectory(DiscreteMaskAccessConversion)
 add_subdirectory(TritonAffinityOpt)

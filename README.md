@@ -93,3 +93,50 @@ C500
 ```bash
 bash compile_on_maca.sh
 ```
+
+### 沐曦自定义算子（Custom Op）
+
+DLCompiler 在沐曦后端同样支持 `dl.custom()` 自定义算子。编译流程为：
+
+`dl.custom()` → `triton_gpu.custom`（携带 Layout 与调度属性）→ `tt.extern_elementwise`（调用用户 bitcode 符号）→ 链接用户 bitcode
+
+使用方式（完整示例见 `test/maca/test_custom_op.py`）：
+
+```python
+import triton.language.extra.deeplink.cann.extension as dl
+
+@dl.register_custom_op
+class add:
+    core = dl.CORE.MXU          # MACA 核类型：MXU / SIMT / TENSOR
+    pipe = dl.PIPE.MX_COMPUTE   # MACA 流水线：MX_PIPE / MX_COMPUTE / MX_MEMORY
+    mode = dl.MODE.MX_SIMD      # MACA 执行模式：MX_SIMD / MX_SIMT / MX_TENSOR
+
+    def __init__(self, a, b, out=None):
+        assert out is not None, "dl.custom() requires out= parameter"
+        self.symbol = "custom_add_" + str(a.dtype)
+        self.bitcode = "maca_add"  # 自动解析为 maca_add.bc
+
+@triton.jit
+def custom_add_kernel(output_ptr, a_ptr, b_ptr, L: tl.constexpr):
+    idx = tl.arange(0, L)
+    a = tl.load(a_ptr + idx)
+    b = tl.load(b_ptr + idx)
+    buf = tl.full([L], 0, a.dtype)
+    res = dl.custom("add", a, b, out=buf)
+    tl.store(output_ptr + idx, res)
+```
+
+bitcode 中的函数按"逐元素"ABI 实现（编译器为张量的每个元素生成一次调用，
+bitcode 内无需处理线程组织），例如 `custom_add_fp32(float a, float b)`。
+示例源码见 `dlcompiler/bitcode/src/maca_add.cc`，编译：
+
+```bash
+# 生成 language/deeplink/bitcode/bc/maca_add.bc（依赖 MACA_PATH 或 PATH 中的 mcclang/clang）
+bash dlcompiler/bitcode/compile_maca_bc.sh
+
+# 运行测试（需沐曦设备）
+python test/maca/test_custom_op.py
+```
+
+也可通过 `DLCOMPILER_BITCODE_PATH` 添加 bitcode 搜索路径，或在注册算子时
+直接传入 `.bc` 文件的绝对路径。

@@ -9,6 +9,14 @@ rm -rf dist/ build/ triton.egg-info/
 
 python setup_on_maca.py install -v
 
+# ============================================================================
+# Compile MACA bitcode libraries for dl.custom() custom ops (best effort)
+# ============================================================================
+if [ -f "dlcompiler/bitcode/compile_maca_bc.sh" ]; then
+    bash dlcompiler/bitcode/compile_maca_bc.sh || \
+        echo "Warning: MACA bitcode compilation failed (non-fatal)"
+fi
+
 cd test/maca
 python vector_add.py 2>&1 | tee test.log 
 

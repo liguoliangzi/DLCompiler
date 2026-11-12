@@ -155,6 +155,42 @@ class MACAOptions:
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
+def _get_tritongpu_custom_passes():
+    """Return the dl.custom() pass module, if the DLCompiler plugin is available.
+
+    Stock MetaX triton builds do not ship the ``dicp_triton`` plugin; kernels
+    without dl.custom() calls must keep compiling on such builds.
+    """
+    try:
+        from triton._C.libtriton import dicp_triton
+
+        return dicp_triton.passes.tritongpu_custom
+    except (ImportError, AttributeError):
+        return None
+
+
+def _add_convert_triton_to_tritongpu_custom(pm):
+    custom_passes = _get_tritongpu_custom_passes()
+    if custom_passes is not None:
+        custom_passes.add_convert_triton_to_tritongpu_custom(pm)
+
+
+def _add_lower_tritongpu_custom_to_extern(pm):
+    custom_passes = _get_tritongpu_custom_passes()
+    if custom_passes is not None:
+        custom_passes.add_lower_tritongpu_custom_to_extern(pm)
+
+
+def _collect_custom_op_bitcodes(mod, metadata):
+    """Collect dl.custom() bitcode paths from the module into metadata."""
+    bitcodes = []
+    for path in re.findall(r'bitcode\s*=\s*"([^"]+)"', str(mod)):
+        if path not in bitcodes:
+            bitcodes.append(path)
+    if bitcodes:
+        metadata["bitcodes"] = bitcodes
+
+
 class MACABackend(BaseBackend):
 
     @staticmethod
@@ -240,6 +276,9 @@ def make_ttgir(mod, metadata, opt, capability):
     passes.ttir.add_convert_to_ttgpuir(
         pm, f"cuda:{capability}", opt.num_warps, 64, opt.num_ctas
     )
+    # Convert dl.custom() custom ops to triton_gpu.custom so they carry
+    # layouts through the TTGIR optimization passes below.
+    _add_convert_triton_to_tritongpu_custom(pm)
     # optimize TTGIR
     passes.ttgpuir.add_coalesce(pm)
     if capability // 10 >= 8:
@@ -317,7 +356,9 @@ def make_ttgir(mod, metadata, opt, capability):
     passes.common.add_cse(pm)
     passes.common.add_symbol_dce(pm)
     passes.common.add_canonicalizer(pm)
+    _add_lower_tritongpu_custom_to_extern(pm)
     pm.run(mod)
+    _collect_custom_op_bitcodes(mod, metadata)
     return mod
 
 
@@ -359,8 +400,13 @@ def make_llir(src, metadata, options, capability):
     maca_path = os.environ.get("MACA_PATH")
     assert maca_path, "Not found MACA_PATH"
     llir = metax.translate_mlir_to_llir(opted_mlir, maca_path)
-    if options.extern_libs:
-        paths = [path for (name, path) in options.extern_libs]
+    paths = [path for (name, path) in options.extern_libs]
+    # Link user custom op bitcode libraries (dl.custom()) in addition to
+    # the prebuilt mathlib bitcodes.
+    for bitcode in metadata.get("bitcodes") or []:
+        if bitcode not in paths:
+            paths.append(bitcode)
+    if paths:
         llir = metax.link_extern_libs(llir, paths, maca_path)
     metadata["name"] = maca_get_kernel_name(llir)
     return llir
