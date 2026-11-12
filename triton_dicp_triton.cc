@@ -1,8 +1,10 @@
 #include "ir.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Dialect/TritonGPU/IR/Dialect.h"
 
 #include "dicp/AscendLegalize/Passes.h"
 #include "dicp/AutoBlockify/Passes.h"
+#include "dicp/Conversion/TritonToTritonGPUCustom/Passes.h"
 #include "dicp/Dialect/CommonIR/Passes.h"
 #include "dicp/Dialect/TritonDicp/IR/TritonDicpDialect.h"
 #include "dicp/DiscreteMaskAccessConversion/Passes.h"
@@ -1264,6 +1266,19 @@ void init_triton_dicp_passes_ttir(py::module &&m) {
 }
 
 // =============================================================================
+// TritonGPU custom op passes (dl.custom() on GPU/MACA backends)
+// =============================================================================
+
+void init_triton_dicp_passes_tritongpu_custom(py::module &&m) {
+  m.def("add_convert_triton_to_tritongpu_custom", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createTritonToTritonGPUCustomPass());
+  });
+
+  m.def("add_lower_tritongpu_custom_to_extern", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createLowerTritonGPUCustomPass());
+  });
+}
+// =============================================================================
 // Top-level init: init_triton_dicp_triton
 // =============================================================================
 
@@ -1273,6 +1288,8 @@ void init_triton_dicp_triton(py::module &&m) {
   auto passes = m.def_submodule("passes");
   init_triton_dicp_passes_commonir(passes.def_submodule("commonir"));
   init_triton_dicp_passes_ttir(passes.def_submodule("ttir"));
+  init_triton_dicp_passes_tritongpu_custom(
+      passes.def_submodule("tritongpu_custom"));
 
   // DICP NPU IR builder, affine types, hivm enums
   init_dicp_ir(m.def_submodule("ir"));
@@ -1285,7 +1302,8 @@ void init_triton_dicp_triton(py::module &&m) {
                 bufferization::BufferizationDialect, arith::ArithDialect,
                 cf::ControlFlowDialect, func::FuncDialect,
                 linalg::LinalgDialect, index::IndexDialect, math::MathDialect,
-                scf::SCFDialect, triton::TritonDialect, affine::AffineDialect,
+                scf::SCFDialect, triton::TritonDialect,
+                triton::gpu::TritonGPUDialect, affine::AffineDialect,
                 LLVM::LLVMDialect, triton::dicp::TritonDicpDialect>();
     mlir::func::registerInlinerExtension(registry);
     context.appendDialectRegistry(registry);

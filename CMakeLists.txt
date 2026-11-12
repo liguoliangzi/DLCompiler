@@ -57,6 +57,7 @@ if (TRITON_BUILD_PYTHON_MODULE)
 
     # DICP NPU pass libraries
     TritonToLinalg
+    TritonToTritonGPUCustom
     TritonToStructured
     TritonToUnstructure
     TritonToHIVM

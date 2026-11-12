@@ -1,0 +1,41 @@
+diff --git a/include/triton/Dialect/TritonGPU/IR/TritonGPUOps.td b/include/triton/Dialect/TritonGPU/IR/TritonGPUOps.td
+index 67b7d5b91..17f4c6511 100644
+--- a/include/triton/Dialect/TritonGPU/IR/TritonGPUOps.td
++++ b/include/triton/Dialect/TritonGPU/IR/TritonGPUOps.td
+@@ -42,6 +42,36 @@ def TTG_ConvertLayoutOp : TTG_Op<"convert_layout",
+   let assemblyFormat = "$src attr-dict `:` type($src) `->` type($result)";
+ }
+ 
++//===----------------------------------------------------------------------===//
++// Custom Op
++//===----------------------------------------------------------------------===//
++def TTG_CustomOp : TTG_Op<"custom",
++                          [AttrSizedOperandSegments,
++                           MemoryEffects<[MemRead, MemWrite]>]> {
++  let summary = "custom operation";
++
++  let description = [{
++    General interface for custom op on TritonGPU:
++
++      - name : unique op name.
++      - inputs : input parameters.
++      - outputs : output results, designated "init" operands, which act as
++                  initial values for the results of the operation or the init
++                  locations to which the results of the op will be written.
++
++    The op is lowered from the DICP custom op emitted by `dl.custom()`. It
++    carries tensor layouts through its tensor operand/result types and
++    backend scheduling attributes (e.g. `maca.core_type`, `maca.pipe`,
++    `maca.exec_mode`, `symbol`, `bitcode`) in its attribute dictionary so
++    the op can participate in TritonGPU layout propagation and scheduling
++    passes before being expanded to extern calls.
++  }];
++
++  let arguments = (ins StrAttr:$name, Variadic<AnyType>:$inputs,
++                   Variadic<AnyType>:$outputs);
++
++  let results = (outs Variadic<AnyType>:$results);
++}
+ def TTG_AsyncWaitOp : TTG_Op<"async_wait"> {
+   let summary = "async wait";
+ 

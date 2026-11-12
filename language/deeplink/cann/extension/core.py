@@ -108,6 +108,10 @@ class CORE(enum.Enum):
     CUBE = dicp_triton.ir.CoreType.CUBE
     CUBE_OR_VECTOR = dicp_triton.ir.CoreType.CUBE_OR_VECTOR
     CUBE_AND_VECTOR = dicp_triton.ir.CoreType.CUBE_AND_VECTOR
+    # MACA (MetaX) core types, used as plain strings on the maca backend.
+    MXU = "MXU"
+    SIMT = "SIMT"
+    TENSOR = "TENSOR"
 
 
 class PIPE(enum.Enum):
@@ -119,12 +123,20 @@ class PIPE(enum.Enum):
     PIPE_MTE3 = dicp_triton.ir.PIPE.PIPE_MTE3
     PIPE_ALL = dicp_triton.ir.PIPE.PIPE_ALL
     PIPE_FIX = dicp_triton.ir.PIPE.PIPE_FIX
+    # MACA (MetaX) pipeline types, used as plain strings on the maca backend.
+    MX_PIPE = "MX_PIPE"
+    MX_COMPUTE = "MX_COMPUTE"
+    MX_MEMORY = "MX_MEMORY"
 
 
 class MODE(enum.Enum):
     SIMD = dicp_triton.ir.MODE.SIMD
     SIMT = dicp_triton.ir.MODE.SIMT
     MIX = dicp_triton.ir.MODE.MIX
+    # MACA (MetaX) execution modes, used as plain strings on the maca backend.
+    MX_SIMD = "MX_SIMD"
+    MX_SIMT = "MX_SIMT"
+    MX_TENSOR = "MX_TENSOR"
 
 
 class IteratorType(enum.Enum):

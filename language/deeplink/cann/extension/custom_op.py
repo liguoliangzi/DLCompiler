@@ -187,6 +187,20 @@ def _make_arg_attrs(op, builder):
     return arg_attrs
 
 
+def _get_current_backend():
+    """Best-effort detection of the active triton backend name.
+
+    Returns e.g. "ascend" or "maca"; falls back to "ascend" (the historical
+    default) when the driver cannot be queried.
+    """
+    try:
+        from triton.runtime.driver import driver
+
+        return driver.active.get_current_target().backend
+    except Exception:
+        return "ascend"
+
+
 def _get_bitcode_search_paths():
     """Return list of directories to search for bitcode files, ordered by priority."""
     import os
@@ -229,12 +243,18 @@ def _get_bitcode_search_paths():
     return paths
 
 
-def _resolve_bitcode_path(bitcode_ref):
+def _get_bitcode_suffix(backend):
+    """Return the bitcode file suffix used by the given backend."""
+    return ".bc" if backend == "maca" else ".aiv.bc"
+
+
+def _resolve_bitcode_path(bitcode_ref, backend="ascend"):
     """Resolve a user-provided bitcode reference to an absolute file path.
 
     Resolution logic:
       1. If bitcode_ref is an existing file -> return its absolute path
-      2. If bitcode_ref is a name -> search for {name}.aiv.bc in search paths
+      2. If bitcode_ref is a name -> search for {name}{suffix} in search
+         paths, where suffix is ".aiv.bc" on Ascend and ".bc" on MACA
     """
     from pathlib import Path
 
@@ -248,7 +268,7 @@ def _resolve_bitcode_path(bitcode_ref):
     if bitcode.suffix == ".bc":
         search_name = bitcode.name
     else:
-        search_name = f"{bitcode.name}.aiv.bc"
+        search_name = f"{bitcode.name}{_get_bitcode_suffix(backend)}"
 
     for search_dir in _get_bitcode_search_paths():
         candidate = Path(search_dir) / search_name
@@ -261,7 +281,8 @@ def _resolve_bitcode_path(bitcode_ref):
         f"  Searched for '{search_name}' in:\n"
         f"  {searched_dirs}\n"
         f"  Set DLCOMPILER_BITCODE_PATH to add custom search paths, "
-        f"or provide an absolute path to an existing .aiv.bc file."
+        f"or provide an absolute path to an existing "
+        f"{_get_bitcode_suffix(backend)} file."
     )
 
 
@@ -270,14 +291,14 @@ def _add_optional_attr(op, name, builder, attrs):
         attrs[name] = builder.get_string_attr(getattr(op, name))
 
 
-def _add_bitcode_attr(op, builder, attrs):
+def _add_bitcode_attr(op, builder, attrs, backend):
     name = "bitcode"
     if not hasattr(op, name):
         return
 
     from pathlib import Path
 
-    bitcode_path = _resolve_bitcode_path(getattr(op, name))
+    bitcode_path = _resolve_bitcode_path(getattr(op, name), backend)
     attrs[name] = builder.get_string_attr(bitcode_path)
 
 
@@ -320,12 +341,40 @@ def _add_optional_iterator_types_attr(op, builder, attrs):
     )
 
 
+_MACA_CORE_TYPES = {"MXU", "SIMT", "TENSOR"}
+_MACA_PIPES = {"MX_PIPE", "MX_COMPUTE", "MX_MEMORY"}
+_MACA_MODES = {"MX_SIMD", "MX_SIMT", "MX_TENSOR"}
+
+
+def _check_maca_enums(op):
+    """Validate that MACA-specific enum values are used on the MACA backend."""
+    assert (
+        op.core.value in _MACA_CORE_TYPES
+    ), f"Invalid MACA core type {op.core.value!r}, expected one of {sorted(_MACA_CORE_TYPES)}."
+    assert (
+        op.pipe.value in _MACA_PIPES
+    ), f"Invalid MACA pipe {op.pipe.value!r}, expected one of {sorted(_MACA_PIPES)}."
+    assert (
+        op.mode.value in _MACA_MODES
+    ), f"Invalid MACA mode {op.mode.value!r}, expected one of {sorted(_MACA_MODES)}."
+
+
 def _make_attrs(op, builder):
-    attrs = {
-        "hivm.tcore_type": builder.get_core_type_attr(op.core.value),
-        "hivm.pipe": builder.get_pipe_attr(op.pipe.value),
-        "hivm.vf_mode": builder.get_vf_mode_attr(op.mode.value),
-    }
+    backend = _get_current_backend()
+    if backend == "maca":
+        if not op.name.startswith("__builtin_"):
+            _check_maca_enums(op)
+        attrs = {
+            "maca.core_type": builder.get_string_attr(op.core.value),
+            "maca.pipe": builder.get_string_attr(op.pipe.value),
+            "maca.exec_mode": builder.get_string_attr(op.mode.value),
+        }
+    else:
+        attrs = {
+            "hivm.tcore_type": builder.get_core_type_attr(op.core.value),
+            "hivm.pipe": builder.get_pipe_attr(op.pipe.value),
+            "hivm.vf_mode": builder.get_vf_mode_attr(op.mode.value),
+        }
 
     if not op.name.startswith("__builtin_"):
         assert hasattr(op, "symbol"), "Non builtin custom op, symbol is required."
@@ -333,7 +382,7 @@ def _make_attrs(op, builder):
             op, "bitcode"
         ), "Non builtin custom op, bitcode path is required."
 
-    _add_bitcode_attr(op, builder, attrs)
+    _add_bitcode_attr(op, builder, attrs, backend)
     _add_optional_indexing_map_attr(op, builder, attrs)
     _add_optional_iterator_types_attr(op, builder, attrs)
     _add_optional_extra_buffer_attr(op, builder, attrs)
